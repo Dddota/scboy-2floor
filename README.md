@@ -49,11 +49,18 @@
 4. 清空默认模板，粘入本文件全部内容
 5. Ctrl+S 保存
 
-### 3. 配置 LLM（快速通道 · 推荐）
+### 3. 配置 LLM
 
-点 Tampermonkey 图标 → 找到本脚本条目 → 点 **🎯 选择服务预设**，按编号选一个，脚本会自动填好 `base_url`、模型示例，然后向你要 API Key。
+安装完刷新任意 scboy 页面后，点 Tampermonkey 图标 → 找到本脚本 → 点 **⚙️ 打开设置面板**，会弹出一个内嵌的设置窗口，一屏搞定：
 
-也可以点 **⚙️ 设置** 手动逐项填写：
+- **🎯 服务预设**：下拉里选一个（DeepSeek / 千问 / 方舟 Doubao / Kimi / OpenAI / OpenRouter / Ollama / Copilot 代理 …），`base_url` 和模型下拉会自动填好，只需再粘 API Key。
+- **🔑 LLM 连接**：`base_url` / `api_key` / `model`（也可切「手动输入」自填任意模型名）。
+- **🔌 测试连通性**：底部左侧按钮，用当前表单值直发一次真实请求，不改动库里已存的值，成功/失败结果就地显示。
+- **📊 策略参数**：temperature / 凯利折扣 / 最小 EV / 单笔上限% / 硬下限 / 硬上限。
+- **🐞 调试日志**：勾上后 console 会输出详细日志。
+- **恢复默认**：把所有字段恢复为出厂值（不动 API Key，未点保存不写入）。
+
+字段含义速查：
 
 | 字段 | 说明 | 示例 |
 |---|---|---|
@@ -62,13 +69,12 @@
 | `model` | 模型名 | `deepseek-v4-flash` |
 | `temperature` | 采样温度，越低越保守 | `0.2` |
 | `凯利折扣` | 0.5=Half-Kelly（推荐）；1=Full 太激进；0.25=更保守 | `0.5` |
-| `最小 EV 阈值` | 边际低于此值不推荐下注 | `0.05` (即 5%) |
-| `单笔上限%` | 单笔最多用多少余额（防梭哈） | `0.15` (即 15%) |
+| `最小 EV` | 边际低于此值不推荐下注 | `0.05`（即 5%） |
+| `单笔上限%` | 单笔最多用多少余额（防梭哈） | `0.15`（即 15%） |
 | `硬下限` | 站点最低 100 | `100` |
 | `硬上限` | 站点最高 10000 | `10000` |
-| `调试日志` | true / false | `false` |
 
-设完后，点 Tampermonkey → **🔌 测试 LLM 连通性** 验证 key。
+> 首次打开设置面板时，如果你的 `base_url` 匹配某个内置预设，脚本会自动选中它并填好模型下拉。
 
 ---
 
@@ -79,7 +85,7 @@
 进入任意竞猜详情页（URL 形如 `/?bet-detail-5537.htm`，二选一 / 三选一 / 四选一均支持），页面顶部会自动注入一个面板：
 
 ```
-🤖 LLM 竞猜辅助                 [v0.1]
+🤖 LLM 竞猜辅助                 [v0.2.0]
 [开始分析]  将调用大模型并抓取 liquipedia 分析。
 ```
 
@@ -159,7 +165,7 @@ newOdds_A = 1 + poolB / (poolA + x)
 
 **Q: LLM 返回 401 / 403?**
 - API Key 错了，或者 base_url 末尾多带了 `/`
-- 用「🔌 测试 LLM 连通性」诊断
+- 用「⚙️ 打开设置面板」里的 **🔌 测试连通性** 按钮诊断
 
 **Q: 抓 liquipedia 失败？**
 - 首次运行 Tampermonkey 可能弹出询问「是否允许连接 liquipedia.net」，选 **总是允许**
@@ -189,7 +195,7 @@ newOdds_A = 1 + poolB / (poolA + x)
 
 | 服务 | base_url | 示例模型 | 备注 |
 |---|---|---|---|
-| **DeepSeek (V4)** | `https://api.deepseek.com` | `deepseek-v4-flash`, `deepseek-v4-pro` | 国内快，性价比首选。旧 `deepseek-chat`/`deepseek-reasoner` 2026/07/24 弃用 |
+| **DeepSeek (V4)** | `https://api.deepseek.com` | `deepseek-v4-flash`, `deepseek-v4-pro` | 国内快，性价比首选 |
 | **阿里千问 Qwen（国内）** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`, `qwen-max`, `qwen-turbo`, `qwen3-max` | 国内直连快 |
 | **阿里千问 Qwen（国际）** | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | 同上 | 海外/香港节点 |
 | **字节方舟 Doubao** | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-1-6-250615`, `doubao-1-5-pro-32k-250115`, 或控制台创建的 `ep-xxx` | ⚠️ **必须先在方舟控制台开通模型或创建接入点**，否则报错 |
@@ -199,7 +205,7 @@ newOdds_A = 1 + poolB / (poolA + x)
 | **本地 Ollama** | `http://localhost:11434/v1` | `qwen2.5:32b`, `deepseek-r1:14b` | api_key 填任意字符串 |
 | **GitHub Copilot（本地代理）** | `http://localhost:4141/v1` | `gpt-4o`, `claude-sonnet-4.5`, `gemini-2.5-pro` | 见下方专门小节 |
 
-> 想加新家？只要它是 OpenAI 兼容的 `/chat/completions` 接口就行，用「⚙️ 设置」手填 base_url 即可。
+> 想加新家？只要它是 OpenAI 兼容的 `/chat/completions` 接口就行，用「⚙️ 打开设置面板」选 `自定义（OpenAI 兼容）` 手填 base_url 即可。
 
 ### ⚠️ 字节方舟第一次用要注意
 
@@ -222,9 +228,10 @@ npx copilot-api@latest start
 ```
 
 然后在脚本里：
-1. 点 **🎯 选择服务预设** → 选 `GitHub Copilot（本地代理）`
+1. 点 **⚙️ 打开设置面板** → 顶部预设下拉选 `GitHub Copilot（本地代理）`
 2. api_key 随便填一个字符串（比如 `x`）
 3. 模型选 `gpt-4o` / `claude-sonnet-4.5` / `gemini-2.5-pro`
+4. 点底部 **🔌 测试连通性** 确认代理服务已启动
 
 参考项目：https://github.com/ericc-ch/copilot-api
 
@@ -242,6 +249,24 @@ scboy-2floor/
 │   └── detail-bet.html
 └── README.md
 ```
+
+---
+
+## CHANGELOG
+
+### v0.2.0（当前）
+- **⚙️ 全新设置面板**：把「服务预设 / API 连接 / 策略参数 / 连通性测试」合并到一个内嵌 Modal，替换掉 v0.1 里连续弹 10 次 `prompt()` 的旧流程。
+  - 服务预设改成下拉，模型也是下拉（可切「手动输入」），API Key 用密码输入框。
+  - 底部 **🔌 测试连通性** 按钮就地显示结果，不改动已存储的配置。
+  - 首次打开会根据当前 `base_url` 自动匹配预设。
+  - Modal 完全自绘（`sh-modal-*` 命名空间），**不依赖 scboy 站点的 Bootstrap / jQuery**，避免版本嗅探和 Tampermonkey 沙箱问题。
+- GM 菜单精简：`🎯 选择服务预设` + `⚙️ 设置` + `🔌 测试 LLM 连通性` **合并为一项** `⚙️ 打开设置面板`。
+
+### v0.1.0
+- 首个可用版本，K 选一 LLM+Kelly 全面支持
+- 列表页 Tier 1 徽章（市场隐含胜率 + 失衡）
+- 详情页 LLM 分析缓存（有效期到截止时间）
+- 10 家 LLM 服务商预设
 
 ---
 

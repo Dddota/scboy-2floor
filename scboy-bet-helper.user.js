@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SCBOY 二楼竞猜 · LLM 智能辅助
 // @namespace    https://github.com/Dddota/scboy-2floor
-// @version      0.1.0
+// @version      0.2.0
 // @description  用大模型分析 SCBOY 二楼竞猜盘口，给出 Half-Kelly 建议下注金额，支持一键填入/下注；列表页市场信息徽章；二选一 / 三选一 / 四选一均支持。
 // @author       Dddota (By OpenCode)
 // @homepageURL  https://github.com/Dddota/scboy-2floor
@@ -86,8 +86,8 @@
     {
       id: 'deepseek', name: 'DeepSeek（深度求索，V4）',
       baseUrl: 'https://api.deepseek.com',
-      models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-      note: '国内快、便宜，性价比首选。v4-flash 最省钱；v4-pro 更强；deepseek-chat/reasoner 是旧别名，2026/07/24 弃用。'
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    note: '国内快、便宜，性价比首选。v4-flash 最省钱；v4-pro 更强。'
     },
     {
       id: 'qwen', name: '阿里千问 Qwen（DashScope，国内）',
@@ -723,6 +723,119 @@
   .sh-list-badge.warn    { background: #fff8c5; color: #7d4e00; }
   .sh-list-badge.err     { background: #ffebe9; color: #cf222e; }
   .sh-list-badge.done    { background: #dafbe1; color: #1a7f37; }
+
+  /* ============ 设置 Modal（v0.2 自绘，与 scboy 站点 Bootstrap 隔离）============ */
+  .sh-modal-mask {
+    position: fixed; inset: 0; background: rgba(15,23,42,.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2147483000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    animation: sh-fadein .12s ease-out;
+  }
+  @keyframes sh-fadein { from { opacity: 0; } to { opacity: 1; } }
+  .sh-modal-dialog {
+    background: #fff; color: #24292f; width: 560px; max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px); border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    display: flex; flex-direction: column; overflow: hidden;
+    font-size: 13px; line-height: 1.5;
+  }
+  .sh-modal-head {
+    padding: 12px 16px; border-bottom: 1px solid #d0d7de;
+    display: flex; align-items: center; justify-content: space-between;
+    background: #f6f8fa;
+  }
+  .sh-modal-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .sh-modal-head .sh-modal-x {
+    background: none; border: 0; font-size: 20px; line-height: 1; cursor: pointer;
+    color: #57606a; padding: 0 4px;
+  }
+  .sh-modal-head .sh-modal-x:hover { color: #cf222e; }
+  .sh-modal-body { padding: 14px 16px; overflow-y: auto; }
+  .sh-modal-body .sh-section-title {
+    font-weight: 600; font-size: 12px; color: #57606a;
+    text-transform: uppercase; letter-spacing: .5px;
+    margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px dashed #d0d7de;
+  }
+  .sh-modal-body .sh-section-title:first-child { margin-top: 0; }
+  .sh-modal-body .sh-field {
+    display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px;
+    align-items: center; margin-bottom: 8px;
+  }
+  .sh-modal-body .sh-field label {
+    color: #24292f; font-weight: 500;
+  }
+  .sh-modal-body .sh-field .sh-hint {
+    grid-column: 2; color: #57606a; font-size: 11px; margin-top: -4px;
+  }
+  .sh-modal-body input[type=text],
+  .sh-modal-body input[type=password],
+  .sh-modal-body input[type=number],
+  .sh-modal-body select {
+    width: 100%; box-sizing: border-box;
+    padding: 5px 8px; border: 1px solid #d0d7de; border-radius: 6px;
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    background: #fff; color: #24292f;
+  }
+  .sh-modal-body select { font-family: inherit; }
+  .sh-modal-body input:focus, .sh-modal-body select:focus {
+    outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,.15);
+  }
+  .sh-modal-body input[type=checkbox] { width: auto; }
+  .sh-modal-body .sh-field-check {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .sh-modal-body .sh-note {
+    background: #fff8c5; border: 1px solid #d4a72c;
+    padding: 6px 10px; border-radius: 6px; color: #7d4e00;
+    font-size: 12px; margin: 8px 0;
+  }
+  .sh-modal-body details.sh-adv {
+    margin: 14px 0 4px; border-top: 1px dashed #d0d7de; padding-top: 8px;
+  }
+  .sh-modal-body details.sh-adv > summary {
+    cursor: pointer; user-select: none; list-style: none;
+    font-weight: 600; font-size: 12px; color: #57606a;
+    text-transform: uppercase; letter-spacing: .5px;
+    padding: 4px 0; outline: none;
+  }
+  .sh-modal-body details.sh-adv > summary::-webkit-details-marker { display: none; }
+  .sh-modal-body details.sh-adv > summary::before {
+    content: '▶'; display: inline-block; margin-right: 6px;
+    font-size: 10px; transition: transform .15s;
+  }
+  .sh-modal-body details.sh-adv[open] > summary::before { transform: rotate(90deg); }
+  .sh-modal-body details.sh-adv > summary:hover { color: #0969da; }
+  .sh-modal-body details.sh-adv .sh-section-title {
+    margin-top: 12px; border-bottom: none; padding-bottom: 0;
+  }
+  .sh-modal-body details.sh-adv .sh-section-title:first-of-type { margin-top: 8px; }
+  .sh-modal-body .sh-test-out {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px; background: #f6f8fa; border: 1px solid #d0d7de;
+    border-radius: 6px; padding: 6px 8px; margin-top: 8px;
+    white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto;
+    display: none;
+  }
+  .sh-modal-body .sh-test-out.show { display: block; }
+  .sh-modal-body .sh-test-out.ok  { border-color: #1a7f37; background: #dafbe1; color: #1a7f37; }
+  .sh-modal-body .sh-test-out.err { border-color: #cf222e; background: #ffebe9; color: #cf222e; }
+  .sh-modal-foot {
+    padding: 10px 16px; border-top: 1px solid #d0d7de; background: #f6f8fa;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .sh-modal-foot .sh-foot-left { display: flex; gap: 8px; }
+  .sh-modal-foot .sh-foot-right { display: flex; gap: 8px; }
+  .sh-modal-foot .sh-btn2 {
+    border: 1px solid #d0d7de; background: #f6f8fa; padding: 5px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; color: #24292f;
+  }
+  .sh-modal-foot .sh-btn2:hover:not(:disabled) { background: #eaeef2; }
+  .sh-modal-foot .sh-btn2:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sh-modal-foot .sh-btn2.primary { background: #1f883d; color: #fff; border-color: #1f883d; }
+  .sh-modal-foot .sh-btn2.primary:hover:not(:disabled) { background: #1a7f37; }
+  .sh-modal-foot .sh-btn2.link { background: none; border: 0; color: #0969da; padding: 5px 8px; }
+  .sh-modal-foot .sh-btn2.link:hover { text-decoration: underline; }
   `;
 
   function injectStyles() {
@@ -746,7 +859,7 @@
       // 用当前最新 detail（池/赔率/余额可能已漂移）+ 缓存的 prediction 重新算 decision
       try {
         const decision = decideStake(cached.prediction, detail);
-        wrap.innerHTML = `<div class="sh-title"><span>🤖 LLM 竞猜辅助</span><span class="sh-badge">v0.1.0</span></div><div class="sh-body"></div>`;
+        wrap.innerHTML = `<div class="sh-title"><span>🤖 LLM 竞猜辅助</span><span class="sh-badge">v0.2.0</span></div><div class="sh-body"></div>`;
         const target = document.querySelector('#choices') || document.querySelector('.card-body');
         if (target) target.insertBefore(wrap, target.firstChild);
         else document.body.prepend(wrap);
@@ -762,7 +875,7 @@
     wrap.innerHTML = `
       <div class="sh-title">
         <span>🤖 LLM 竞猜辅助</span>
-        <span class="sh-badge">v0.1.0</span>
+        <span class="sh-badge">v0.2.0</span>
       </div>
       <div class="sh-body">
         <button class="sh-btn primary" id="sh-analyze">开始分析</button>
@@ -924,107 +1037,405 @@
   }
 
   // ============================================================
-  // 设置面板（走原生 prompt 组合，避免复杂 UI）
+  // 设置面板（v0.2 自绘 Modal —— 预设+参数+测试连通性 一屏搞定）
   // ============================================================
-  function pickPreset() {
-    const list = PROVIDERS.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-    const raw = prompt(
-      '🎯 选择 LLM 服务预设\n\n' + list + '\n\n输入编号（1-' + PROVIDERS.length + '），或留空取消：',
-      ''
-    );
-    if (!raw) return;
-    const idx = parseInt(raw, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= PROVIDERS.length) { alert('无效编号：' + raw); return; }
-    const p = PROVIDERS[idx];
 
-    // 自定义 → 直接进 openSettings 全流程
-    if (p.id === 'custom') { openSettings(); return; }
+  /** 通用 Modal 挂载。返回 { root, body, foot, close }。close 会解绑 ESC/点遮罩事件。 */
+  function showModal(title) {
+    // 单例：已存在就先移除
+    const old = document.getElementById('sh-modal-mask');
+    if (old) old.remove();
 
-    setCfg(CONFIG_KEYS.baseUrl, p.baseUrl);
+    const mask = document.createElement('div');
+    mask.className = 'sh-modal-mask';
+    mask.id = 'sh-modal-mask';
+    mask.innerHTML =
+      '<div class="sh-modal-dialog" role="dialog" aria-modal="true">' +
+        '<div class="sh-modal-head">' +
+          '<h3></h3>' +
+          '<button type="button" class="sh-modal-x" title="关闭">×</button>' +
+        '</div>' +
+        '<div class="sh-modal-body"></div>' +
+        '<div class="sh-modal-foot">' +
+          '<div class="sh-foot-left"></div>' +
+          '<div class="sh-foot-right"></div>' +
+        '</div>' +
+      '</div>';
 
-    // 选模型
-    let model = p.models[0] || '';
-    if (p.models.length > 1) {
-      const modelList = p.models.map((m, i) => `${i + 1}. ${m}`).join('\n');
-      const rawM = prompt(
-        `选择模型（${p.name}）\n\n${modelList}\n\n输入编号，或直接手动输入模型名：`,
-        '1'
-      );
-      if (rawM === null) return;
-      const mi = parseInt(rawM, 10) - 1;
-      if (!isNaN(mi) && mi >= 0 && mi < p.models.length) model = p.models[mi];
-      else if (rawM.trim()) model = rawM.trim();
+    document.body.appendChild(mask);
+    mask.querySelector('.sh-modal-head h3').textContent = title || '设置';
+
+    const dialog = mask.querySelector('.sh-modal-dialog');
+    const body   = mask.querySelector('.sh-modal-body');
+    const foot   = mask.querySelector('.sh-modal-foot');
+    const footL  = foot.querySelector('.sh-foot-left');
+    const footR  = foot.querySelector('.sh-foot-right');
+    const closeBtn = mask.querySelector('.sh-modal-x');
+
+    function close() {
+      document.removeEventListener('keydown', onKey, true);
+      mask.remove();
     }
-    setCfg(CONFIG_KEYS.model, model);
-
-    // API Key
-    const curKey = cfg(CONFIG_KEYS.apiKey);
-    const keyHint = p.id === 'ollama' || p.id === 'copilot-proxy'
-      ? '（本地代理 api_key 随便填任意字符串，如 "x"）'
-      : '';
-    const rawKey = prompt(
-      `${p.name}\nAPI Key ${keyHint}\n\n当前：${curKey ? '(已存在，留空保留)' : '(未设置)'}`,
-      ''
-    );
-    if (rawKey === null) return;
-    if (rawKey.trim()) setCfg(CONFIG_KEYS.apiKey, rawKey.trim());
-    else if (!curKey && (p.id === 'ollama' || p.id === 'copilot-proxy')) {
-      setCfg(CONFIG_KEYS.apiKey, 'x');   // 本地代理占位
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); }
     }
+    document.addEventListener('keydown', onKey, true);
 
-    alert(
-      '✅ 已应用预设：' + p.name +
-      '\n\nbase_url: ' + p.baseUrl +
-      '\nmodel:    ' + model +
-      (p.note ? '\n\n📝 ' + p.note : '') +
-      '\n\n可再点「⚙️ 设置」调温度/凯利参数，或「🔌 测试 LLM 连通性」验证。'
-    );
+    // 点遮罩关（点对话框内不关）
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+    // 拦截冒泡到站点的点击
+    dialog.addEventListener('click', (e) => e.stopPropagation());
+    closeBtn.addEventListener('click', close);
+
+    return { root: mask, body, footLeft: footL, footRight: footR, close };
   }
 
+  /** 打开设置面板（v0.2 主入口） */
   function openSettings() {
-    const fields = [
-      { key: CONFIG_KEYS.baseUrl,    label: 'OpenAI 兼容 base_url (末尾不加/)',                                type: 'string' },
-      { key: CONFIG_KEYS.apiKey,     label: 'API Key',                                                            type: 'string' },
-      { key: CONFIG_KEYS.model,      label: '模型名 (示例: deepseek-v4-flash / gpt-4o-mini / qwen-plus / doubao-seed-1-6-250615)', type: 'string' },
-      { key: CONFIG_KEYS.temperature,label: 'temperature (0~1)',                                                  type: 'number' },
-      { key: CONFIG_KEYS.kellyFrac,  label: '凯利折扣 (0.5=Half-Kelly, 0.25=Quarter, 1=Full 不推荐)',              type: 'number' },
-      { key: CONFIG_KEYS.minEV,      label: '最小 EV 阈值 (低于则不推荐; 0.05 表示 5% 边际)',                      type: 'number' },
-      { key: CONFIG_KEYS.maxStakePct,label: '单笔上限占余额百分比 (0.15 = 15%)',                                   type: 'number' },
-      { key: CONFIG_KEYS.minStake,   label: '硬下限 (站点最低 100)',                                                type: 'number' },
-      { key: CONFIG_KEYS.maxStake,   label: '硬上限 (站点最高 10000)',                                              type: 'number' },
-      { key: CONFIG_KEYS.debug,      label: '调试日志? (true/false)',                                              type: 'bool' }
-    ];
+    const m = showModal('⚙️ LLM 竞猜辅助 · 设置');
 
-    for (const f of fields) {
-      const cur = cfg(f.key);
-      const raw = prompt(`⚙️ ${f.label}\n\n当前：${cur}\n（留空取消该项，输入 __reset 恢复默认）`, String(cur));
-      if (raw === null) return;                     // 用户按取消 → 中止后续
-      if (raw === '') continue;
-      if (raw === '__reset') { setCfg(f.key, DEFAULTS[f.key]); continue; }
-      let val = raw;
-      if (f.type === 'number') { val = Number(raw); if (!isFinite(val)) { alert('无效数字：' + raw); continue; } }
-      if (f.type === 'bool')   { val = /^(1|true|yes|y|on)$/i.test(raw); }
-      setCfg(f.key, val);
+    // -------- 表单模板 --------
+    const html =
+      '<div class="sh-section-title">🎯 服务预设</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-preset">快速填充</label>' +
+        '<select id="sh-f-preset"></select>' +
+      '</div>' +
+      '<div id="sh-preset-note" class="sh-note" style="display:none"></div>' +
+
+      '<div class="sh-section-title">🔑 LLM 连接</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-baseurl">base_url</label>' +
+        '<input type="text" id="sh-f-baseurl" placeholder="https://api.deepseek.com" spellcheck="false"/>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-apikey">API Key</label>' +
+        '<input type="password" id="sh-f-apikey" placeholder="sk-..." spellcheck="false" autocomplete="off"/>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-model">模型</label>' +
+        '<select id="sh-f-model" style="display:none"></select>' +
+        '<input type="text" id="sh-f-model-input" placeholder="deepseek-v4-flash" spellcheck="false"/>' +
+      '</div>' +
+      '<div class="sh-test-out" id="sh-test-out"></div>' +
+
+      '<details class="sh-adv">' +
+      '<summary>⚙️ 高级选项（策略参数 / 调试日志）</summary>' +
+
+      '<div class="sh-section-title">📊 策略参数</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-temp">temperature</label>' +
+        '<input type="number" step="0.1" min="0" max="2" id="sh-f-temp"/>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-kelly">凯利折扣</label>' +
+        '<input type="number" step="0.05" min="0" max="1" id="sh-f-kelly"/>' +
+        '<div class="sh-hint">0.5 = Half-Kelly（推荐）· 0.25 = Quarter · 1 = Full（不推荐）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-minev">最小 EV</label>' +
+        '<input type="number" step="0.01" min="0" max="1" id="sh-f-minev"/>' +
+        '<div class="sh-hint">EV 低于此值则不推荐下注（0.05 = 5%）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-pct">单笔上限%</label>' +
+        '<input type="number" step="0.01" min="0" max="1" id="sh-f-pct"/>' +
+        '<div class="sh-hint">占当前余额百分比（0.15 = 15%）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-min">硬下限</label>' +
+        '<input type="number" step="1" min="1" id="sh-f-min"/>' +
+        '<div class="sh-hint">站点最低 100 金币</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-max">硬上限</label>' +
+        '<input type="number" step="1" min="1" id="sh-f-max"/>' +
+        '<div class="sh-hint">站点最高 10000 金币</div>' +
+      '</div>' +
+
+      '<div class="sh-section-title">🐞 调试</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-debug">调试日志</label>' +
+        '<div class="sh-field-check">' +
+          '<input type="checkbox" id="sh-f-debug"/>' +
+          '<span style="color:#57606a;font-size:11px;">开启后 console 会输出详细日志</span>' +
+        '</div>' +
+      '</div>' +
+
+      '</details>';
+
+    m.body.innerHTML = html;
+
+    // -------- 载入当前配置 --------
+    const $ = (id) => m.body.querySelector(id);
+    const inpBase   = $('#sh-f-baseurl');
+    const inpKey    = $('#sh-f-apikey');
+    const selModel  = $('#sh-f-model');
+    const inpModel  = $('#sh-f-model-input');
+    const inpTemp   = $('#sh-f-temp');
+    const inpKelly  = $('#sh-f-kelly');
+    const inpMinEv  = $('#sh-f-minev');
+    const inpPct    = $('#sh-f-pct');
+    const inpMinS   = $('#sh-f-min');
+    const inpMaxS   = $('#sh-f-max');
+    const inpDebug  = $('#sh-f-debug');
+    const selPreset = $('#sh-f-preset');
+    const noteBox   = $('#sh-preset-note');
+    const testOut   = $('#sh-test-out');
+
+    inpBase.value  = cfg(CONFIG_KEYS.baseUrl);
+    inpKey.value   = cfg(CONFIG_KEYS.apiKey);
+    inpModel.value = cfg(CONFIG_KEYS.model);
+    inpTemp.value  = cfg(CONFIG_KEYS.temperature);
+    inpKelly.value = cfg(CONFIG_KEYS.kellyFrac);
+    inpMinEv.value = cfg(CONFIG_KEYS.minEV);
+    inpPct.value   = cfg(CONFIG_KEYS.maxStakePct);
+    inpMinS.value  = cfg(CONFIG_KEYS.minStake);
+    inpMaxS.value  = cfg(CONFIG_KEYS.maxStake);
+    inpDebug.checked = !!cfg(CONFIG_KEYS.debug);
+
+    // -------- 预设下拉 --------
+    const optPlaceholder = document.createElement('option');
+    optPlaceholder.value = '';
+    optPlaceholder.textContent = '— 选择快速填充 —';
+    selPreset.appendChild(optPlaceholder);
+    for (const p of PROVIDERS) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.name;
+      selPreset.appendChild(o);
     }
-    alert('✅ 设置已保存');
-  }
 
-  function testLLM() {
-    (async () => {
-      try {
-        const dummy = {
-          title: 'Test Match', category: '[test]', description: 'ping', liquipediaUrl: null,
-          totalPool: 100, balance: 10000,
-          choices: [
-            { value: '0', name: 'Alpha', odds: 1.5, pool: 60 },
-            { value: '1', name: 'Beta',  odds: 3.0, pool: 40 }
-          ]
-        };
-        const r = await callLLM(dummy, '');
-        alert('✅ LLM 连通\n\n' + JSON.stringify(r, null, 2));
-      } catch (e) {
-        alert('❌ LLM 调用失败：\n' + e.message);
+    /** 应用预设到表单（不写 GM_setValue，保存时才写） */
+    function applyPreset(id) {
+      const p = PROVIDERS.find(x => x.id === id);
+      if (!p) return;
+      if (p.id === 'custom') {
+        // 自定义：清空 base_url 与模型下拉，让用户手填
+        inpBase.value = '';
+        selModel.style.display = 'none';
+        inpModel.style.display = '';
+        noteBox.style.display = 'none';
+        return;
       }
+      inpBase.value = p.baseUrl;
+
+      // 填充模型下拉
+      selModel.innerHTML = '';
+      if (p.models && p.models.length > 0) {
+        for (const mo of p.models) {
+          const o = document.createElement('option');
+          o.value = mo; o.textContent = mo;
+          selModel.appendChild(o);
+        }
+        const oCustom = document.createElement('option');
+        oCustom.value = '__custom'; oCustom.textContent = '— 手动输入 —';
+        selModel.appendChild(oCustom);
+        selModel.value = p.models[0];
+        inpModel.value = p.models[0];
+        selModel.style.display = '';
+        inpModel.style.display = 'none';
+      } else {
+        selModel.style.display = 'none';
+        inpModel.style.display = '';
+      }
+
+      // 本地代理无 key
+      if (p.id === 'ollama' || p.id === 'copilot-proxy') {
+        if (!inpKey.value) inpKey.value = 'x';
+      }
+
+      if (p.note) { noteBox.textContent = '📝 ' + p.note; noteBox.style.display = ''; }
+      else { noteBox.style.display = 'none'; }
+    }
+
+    selPreset.addEventListener('change', () => applyPreset(selPreset.value));
+
+    // 模型下拉切换 → 手动
+    selModel.addEventListener('change', () => {
+      if (selModel.value === '__custom') {
+        selModel.style.display = 'none';
+        inpModel.style.display = '';
+        inpModel.value = '';
+        inpModel.focus();
+      } else {
+        inpModel.value = selModel.value;
+      }
+    });
+
+    // -------- 底部按钮 --------
+    // 左：测试连通性 + 恢复默认
+    const btnTest = document.createElement('button');
+    btnTest.type = 'button'; btnTest.className = 'sh-btn2';
+    btnTest.textContent = '🔌 测试连通性';
+    m.footLeft.appendChild(btnTest);
+
+    const btnReset = document.createElement('button');
+    btnReset.type = 'button'; btnReset.className = 'sh-btn2 link';
+    btnReset.textContent = '恢复默认';
+    m.footLeft.appendChild(btnReset);
+
+    // 右：取消 + 保存
+    const btnCancel = document.createElement('button');
+    btnCancel.type = 'button'; btnCancel.className = 'sh-btn2';
+    btnCancel.textContent = '取消';
+    m.footRight.appendChild(btnCancel);
+
+    const btnSave = document.createElement('button');
+    btnSave.type = 'button'; btnSave.className = 'sh-btn2 primary';
+    btnSave.textContent = '保存';
+    m.footRight.appendChild(btnSave);
+
+    btnCancel.addEventListener('click', m.close);
+
+    btnReset.addEventListener('click', () => {
+      if (!confirm('恢复所有字段为默认值？（未保存前不会写入）')) return;
+      inpBase.value  = DEFAULTS[CONFIG_KEYS.baseUrl];
+      // apiKey 不重置（避免误删）
+      inpModel.value = DEFAULTS[CONFIG_KEYS.model];
+      selModel.style.display = 'none';
+      inpModel.style.display = '';
+      inpTemp.value  = DEFAULTS[CONFIG_KEYS.temperature];
+      inpKelly.value = DEFAULTS[CONFIG_KEYS.kellyFrac];
+      inpMinEv.value = DEFAULTS[CONFIG_KEYS.minEV];
+      inpPct.value   = DEFAULTS[CONFIG_KEYS.maxStakePct];
+      inpMinS.value  = DEFAULTS[CONFIG_KEYS.minStake];
+      inpMaxS.value  = DEFAULTS[CONFIG_KEYS.maxStake];
+      inpDebug.checked = !!DEFAULTS[CONFIG_KEYS.debug];
+      selPreset.value = '';
+      noteBox.style.display = 'none';
+    });
+
+    function currentModel() {
+      if (selModel.style.display !== 'none') return selModel.value === '__custom' ? inpModel.value.trim() : selModel.value;
+      return inpModel.value.trim();
+    }
+
+    // 测试连通性 —— 用表单当前值，不写库
+    btnTest.addEventListener('click', async () => {
+      const baseUrl = inpBase.value.trim();
+      const apiKey  = inpKey.value.trim();
+      const model   = currentModel();
+      if (!baseUrl || !apiKey || !model) {
+        testOut.className = 'sh-test-out show err';
+        testOut.textContent = '❌ 请先填写 base_url / API Key / 模型';
+        return;
+      }
+      testOut.className = 'sh-test-out show';
+      testOut.textContent = '⏳ 正在测试...';
+      btnTest.disabled = true;
+      try {
+        // 临时改写运行时配置来复用 callLLM，事后还原
+        const backup = {
+          baseUrl: cfg(CONFIG_KEYS.baseUrl),
+          apiKey:  cfg(CONFIG_KEYS.apiKey),
+          model:   cfg(CONFIG_KEYS.model),
+          temp:    cfg(CONFIG_KEYS.temperature)
+        };
+        setCfg(CONFIG_KEYS.baseUrl, baseUrl);
+        setCfg(CONFIG_KEYS.apiKey,  apiKey);
+        setCfg(CONFIG_KEYS.model,   model);
+        try {
+          const dummy = {
+            title: 'Test', category: '[test]', description: 'ping', liquipediaUrl: null,
+            totalPool: 100, balance: 10000,
+            choices: [
+              { value: '0', name: 'Alpha', odds: 1.5, pool: 60 },
+              { value: '1', name: 'Beta',  odds: 3.0, pool: 40 }
+            ]
+          };
+          const r = await callLLM(dummy, '');
+          testOut.className = 'sh-test-out show ok';
+          testOut.textContent = '✅ LLM 连通\n\n' + JSON.stringify(r, null, 2);
+        } finally {
+          // 还原（用户没点保存 → 不应留下改动）
+          setCfg(CONFIG_KEYS.baseUrl, backup.baseUrl);
+          setCfg(CONFIG_KEYS.apiKey,  backup.apiKey);
+          setCfg(CONFIG_KEYS.model,   backup.model);
+          setCfg(CONFIG_KEYS.temperature, backup.temp);
+        }
+      } catch (e) {
+        testOut.className = 'sh-test-out show err';
+        testOut.textContent = '❌ ' + (e && e.message ? e.message : String(e));
+      } finally {
+        btnTest.disabled = false;
+      }
+    });
+
+    // 保存 —— 校验+写入
+    btnSave.addEventListener('click', () => {
+      const baseUrl = inpBase.value.trim();
+      const apiKey  = inpKey.value.trim();
+      const model   = currentModel();
+      if (!baseUrl) { alert('base_url 不能为空'); inpBase.focus(); return; }
+      if (!apiKey)  { alert('API Key 不能为空'); inpKey.focus(); return; }
+      if (!model)   { alert('模型名不能为空'); (selModel.style.display !== 'none' ? selModel : inpModel).focus(); return; }
+
+      // 展开高级选项（若字段校验失败，需让用户看到出错的输入框）
+      const ensureAdvOpen = (el) => {
+        const d = el && el.closest && el.closest('details.sh-adv');
+        if (d && !d.open) d.open = true;
+      };
+
+      const nums = [
+        { el: inpTemp,  key: CONFIG_KEYS.temperature, name: 'temperature' },
+        { el: inpKelly, key: CONFIG_KEYS.kellyFrac,   name: '凯利折扣' },
+        { el: inpMinEv, key: CONFIG_KEYS.minEV,       name: '最小 EV' },
+        { el: inpPct,   key: CONFIG_KEYS.maxStakePct, name: '单笔上限%' },
+        { el: inpMinS,  key: CONFIG_KEYS.minStake,    name: '硬下限' },
+        { el: inpMaxS,  key: CONFIG_KEYS.maxStake,    name: '硬上限' }
+      ];
+      for (const n of nums) {
+        const v = Number(n.el.value);
+        if (!isFinite(v)) { ensureAdvOpen(n.el); alert(n.name + ' 无效：' + n.el.value); n.el.focus(); return; }
+      }
+
+      setCfg(CONFIG_KEYS.baseUrl, baseUrl);
+      setCfg(CONFIG_KEYS.apiKey,  apiKey);
+      setCfg(CONFIG_KEYS.model,   model);
+      for (const n of nums) setCfg(n.key, Number(n.el.value));
+      setCfg(CONFIG_KEYS.debug, !!inpDebug.checked);
+
+      m.close();
+      // 用轻量提示替代 alert（避免打断）
+      if (typeof GM_notification === 'function') {
+        try { GM_notification({ title: 'SCBOY-Bet', text: '✅ 设置已保存', timeout: 2500 }); }
+        catch (_) { alert('✅ 设置已保存'); }
+      } else {
+        alert('✅ 设置已保存');
+      }
+    });
+
+    // 首次打开：如果当前 base_url 匹配某预设，自动选中并填充模型下拉
+    (function autoDetectPreset() {
+      const curBase = cfg(CONFIG_KEYS.baseUrl);
+      const curModel = cfg(CONFIG_KEYS.model);
+      const match = PROVIDERS.find(p => p.id !== 'custom' && p.baseUrl === curBase);
+      if (!match) return;
+      selPreset.value = match.id;
+      // 填充模型下拉；若当前模型在预设列表里 → 选中；否则显示手动输入
+      selModel.innerHTML = '';
+      let found = false;
+      for (const mo of (match.models || [])) {
+        const o = document.createElement('option');
+        o.value = mo; o.textContent = mo;
+        selModel.appendChild(o);
+        if (mo === curModel) found = true;
+      }
+      const oCustom = document.createElement('option');
+      oCustom.value = '__custom'; oCustom.textContent = '— 手动输入 —';
+      selModel.appendChild(oCustom);
+
+      if (found) {
+        selModel.value = curModel;
+        selModel.style.display = '';
+        inpModel.style.display = 'none';
+      } else {
+        selModel.value = '__custom';
+        selModel.style.display = 'none';
+        inpModel.style.display = '';
+      }
+      if (match.note) { noteBox.textContent = '📝 ' + match.note; noteBox.style.display = ''; }
     })();
   }
 
@@ -1236,9 +1647,7 @@
   function main() {
     injectStyles();
 
-    GM_registerMenuCommand('🎯 选择服务预设 (千问/方舟/DeepSeek/...)', pickPreset);
-    GM_registerMenuCommand('⚙️ 设置 (base_url / api_key / 模型)', openSettings);
-    GM_registerMenuCommand('🔌 测试 LLM 连通性',                  testLLM);
+    GM_registerMenuCommand('⚙️ 打开设置面板 (LLM / 策略 / 测试连通性)', openSettings);
     GM_registerMenuCommand(
       (cfg(CONFIG_KEYS.listAutoScan) ? '✅' : '⬜') + ' 列表页自动扫描（15 分缓存）',
       () => {

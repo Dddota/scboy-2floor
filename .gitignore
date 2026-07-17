@@ -1,0 +1,15 @@
+# Editor / IDE
+.idea/
+.vscode/
+
+# OpenCode / codegraph 本地工具目录
+.codegraph/
+.omo/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
