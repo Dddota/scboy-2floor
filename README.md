@@ -3,7 +3,8 @@
 一个 **Tampermonkey 油猴脚本**，用大模型帮你分析 [SCBOY](https://www.scboy.cc/) 二楼「老板请上二楼」竞猜盘口的胜率，并按 **Half-Kelly** 公式给出建议下注金额，支持 **一键填入** 或 **一键下注**。
 
 - 仓库：<https://github.com/Dddota/scboy-2floor>
-- 一键安装：<https://raw.githubusercontent.com/Dddota/scboy-2floor/main/scboy-bet-helper.user.js>
+- 一键安装（Greasy Fork，国内推荐）：<https://greasyfork.org/zh-CN/scripts/587379>
+- 一键安装（GitHub Raw）：<https://raw.githubusercontent.com/Dddota/scboy-2floor/main/scboy-bet-helper.user.js>
 - 反馈 / Issue：<https://github.com/Dddota/scboy-2floor/issues>
 
 > ⚠️ **免责声明**：本脚本仅供学习和研究用途。竞猜有风险，LLM 判断存在错误可能，任何金币损失自负。**不要用真金白银场景**。
@@ -30,13 +31,23 @@
 
 ### 2. 安装脚本
 
-打开 `scboy-bet-helper.user.js`，把整个文件内容粘到 Tampermonkey：
-1. 点 Tampermonkey 图标 → **管理面板**
-2. 顶部 tab 切到 **`+`（添加脚本）**
-3. 清空默认模板，粘入本文件全部内容
-4. Ctrl+S 保存
+三选一（推荐第 1 种）：
 
-或者：把该文件直接拖到 Tampermonkey 图标上。
+**方式 A · Greasy Fork（国内最快，一键装）**
+1. 打开 <https://greasyfork.org/zh-CN/scripts/587379>
+2. 点绿色的 **【安装此脚本】**
+3. Tampermonkey 会弹出安装页，点【安装】
+
+**方式 B · GitHub Raw（一键装）**
+- 直接点 <https://raw.githubusercontent.com/Dddota/scboy-2floor/main/scboy-bet-helper.user.js>，Tampermonkey 会弹出安装页
+- 国内网络若打不开 raw.githubusercontent.com，请用方式 A 或 C
+
+**方式 C · 手动粘贴**
+1. 打开 `scboy-bet-helper.user.js`，把整个文件内容复制
+2. 点 Tampermonkey 图标 → **管理面板**
+3. 顶部 tab 切到 **`+`（添加脚本）**
+4. 清空默认模板，粘入本文件全部内容
+5. Ctrl+S 保存
 
 ### 3. 配置 LLM（快速通道 · 推荐）
 
