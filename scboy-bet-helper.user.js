@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SCBOY 二楼竞猜 · LLM 智能辅助
 // @namespace    https://github.com/Dddota/scboy-2floor
-// @version      0.2.0
+// @version      0.3.0
 // @description  用大模型分析 SCBOY 二楼竞猜盘口，给出 Half-Kelly 建议下注金额，支持一键填入/下注；列表页市场信息徽章；二选一 / 三选一 / 四选一均支持。
 // @author       Dddota (By OpenCode)
 // @homepageURL  https://github.com/Dddota/scboy-2floor
@@ -55,7 +55,14 @@
     minStake:     'cfg.minStake',        // 硬下限
     maxStake:     'cfg.maxStake',        // 硬上限
     listAutoScan: 'cfg.listAutoScan',    // 列表页是否自动扫描（默认关）
-    debug:        'cfg.debug'
+    debug:        'cfg.debug',
+    // v0.3.0 稳赢-回本模式
+    safeMode:            'cfg.safeMode',            // 是否启用稳赢模式（贝叶斯收缩+效应门槛）
+    allowLongshot:       'cfg.allowLongshot',       // 是否允许冷门博（小仓位）
+    pFinalSafe:          'cfg.pFinalSafe',          // 主推荐所需最低混合胜率
+    longshotEvMul:       'cfg.longshotEvMul',       // 冷门 EV 门槛倍数（相对 minEV）
+    longshotStakeMul:    'cfg.longshotStakeMul',    // 冷门 Kelly 打折系数
+    longshotBalanceCap:  'cfg.longshotBalanceCap'   // 冷门单笔余额上限
   };
 
   const DEFAULTS = {
@@ -69,7 +76,14 @@
     [CONFIG_KEYS.minStake]:    100,
     [CONFIG_KEYS.maxStake]:    10000,
     [CONFIG_KEYS.listAutoScan]: false, // 默认关，用菜单打开
-    [CONFIG_KEYS.debug]:       false
+    [CONFIG_KEYS.debug]:       false,
+    // v0.3.0 稳赢-回本模式
+    [CONFIG_KEYS.safeMode]:            true,
+    [CONFIG_KEYS.allowLongshot]:       true,
+    [CONFIG_KEYS.pFinalSafe]:          0.55,
+    [CONFIG_KEYS.longshotEvMul]:       2.0,
+    [CONFIG_KEYS.longshotStakeMul]:    0.3,
+    [CONFIG_KEYS.longshotBalanceCap]:  0.05
   };
 
   function cfg(key)          { const v = GM_getValue(key, undefined); return v === undefined ? DEFAULTS[key] : v; }
@@ -637,6 +651,26 @@
     return fOpt > 0 && fOpt < 1 && isFinite(g(fOpt)) ? fOpt : 0;
   }
 
+  // v0.3.0 稳赢-回本模式辅助函数
+  /**
+   * 贝叶斯收缩：按 confidence 加权混合 LLM 概率与市场共识
+   * w = confidence（LLM 越自信越信 LLM；越不自信越靠市场）
+   */
+  function blendWithMarket(pLlm, pMarket, confidence) {
+    const w = Math.max(0, Math.min(1, Number(confidence) || 0));
+    return w * pLlm + (1 - w) * pMarket;
+  }
+
+  /**
+   * 效应门槛：odds 越高（越冷门），对 EV 的要求越高
+   * odds=2 时不变；odds=5 约 2.32×；odds=10 约 3.32×
+   */
+  function effectiveMinEV(baseMinEV, odds) {
+    if (!(odds > 1)) return baseMinEV;
+    const mul = 1 + Math.max(0, Math.log2(odds / 2));
+    return baseMinEV * mul;
+  }
+
   function decideStake(prediction, detail) {
     const balance    = detail.balance;
     const kellyFrac  = Number(cfg(CONFIG_KEYS.kellyFrac));
@@ -645,42 +679,123 @@
     const minStake   = Number(cfg(CONFIG_KEYS.minStake));
     const maxStake   = Number(cfg(CONFIG_KEYS.maxStake));
 
-    const evaluate = (side, prob, opponentPool, sidePool) => {
-      const ev0 = computeEV(prob, side.odds);              // 挂牌 EV
-      const f0  = kellyFraction(prob, side.odds);          // 静态 Kelly
-
-      // 动态赔率下的最优 Kelly 比例
-      const fDynamic = kellyDynamicFraction(prob, sidePool, opponentPool, balance);
-      let stake = Math.floor(fDynamic * balance * kellyFrac);
-      stake = Math.min(stake, Math.floor(balance * maxPct), maxStake, balance);
-      stake = Math.max(0, stake);
-
-      const acceptable = stake >= minStake && ev0 >= minEV;
-
-      const effectiveOdds = stake > 0 ? (1 + opponentPool / (sidePool + stake)) : side.odds;
-      const effectiveEV   = computeEV(prob, effectiveOdds);
-
-      return { side, prob, ev: ev0, kelly: f0, fDynamic, stake, acceptable, effectiveOdds, effectiveEV };
-    };
+    // v0.3.0 新参数
+    const safeMode        = !!cfg(CONFIG_KEYS.safeMode);
+    const allowLongshot   = !!cfg(CONFIG_KEYS.allowLongshot);
+    const pFinalSafe      = Number(cfg(CONFIG_KEYS.pFinalSafe));
+    const lsEvMul         = Number(cfg(CONFIG_KEYS.longshotEvMul));
+    const lsStakeMul      = Number(cfg(CONFIG_KEYS.longshotStakeMul));
+    const lsBalanceCap    = Number(cfg(CONFIG_KEYS.longshotBalanceCap));
 
     const cs = detail.choices;
     const totalPool = cs.reduce((s, c) => s + (c.pool || 0), 0);
+    const probsLlm = prediction.probs || [];
+    const confidence = Number(prediction.confidence) || 0;
 
-    // K 选一：某选项赢时，其余全部选项资金池归它 → opponentPool = totalPool - sidePool
-    const opts = cs.map((side, i) => {
+    // 市场共识：池占比（K 选一均适用）
+    const probsMarket = cs.map(c => totalPool > 0 ? (c.pool || 0) / totalPool : 0);
+
+    // 若关闭稳赢模式，混合概率 = LLM 概率（w=1）
+    const probsFinal = probsLlm.map((p, i) =>
+      safeMode ? blendWithMarket(p, probsMarket[i], confidence) : p
+    );
+
+    const evaluate = (side, i) => {
+      const probLlm    = probsLlm[i];
+      const probMarket = probsMarket[i];
+      const probFinal  = probsFinal[i];
       const sidePool     = side.pool || 0;
       const opponentPool = totalPool - sidePool;
-      return evaluate(side, prediction.probs[i], opponentPool, sidePool);
-    });
 
-    // 取 acceptable 中 effectiveEV 最大者；scboy 一次只能押一个 radio，所以只出一个 best
-    const accepted = opts.filter(o => o.acceptable).sort((x, y) => y.effectiveEV - x.effectiveEV);
-    const best = accepted[0] || null;
+      // 用于展示的静态挂牌 EV（按混合概率算，稳赢模式下反映"贝叶斯化"后的真实预期）
+      const ev0 = computeEV(probFinal, side.odds);
+      const f0  = kellyFraction(probFinal, side.odds);
 
-    // 输出时按静态 EV 从大到小排（更直观）
+      // 动态赔率下的最优 Kelly 比例（用混合概率）
+      const fDynamic = kellyDynamicFraction(probFinal, sidePool, opponentPool, balance);
+      let stakeRaw = Math.floor(fDynamic * balance * kellyFrac);
+      stakeRaw = Math.min(stakeRaw, Math.floor(balance * maxPct), maxStake, balance);
+      stakeRaw = Math.max(0, stakeRaw);
+
+      const effectiveOdds = stakeRaw > 0 ? (1 + opponentPool / (sidePool + stakeRaw)) : side.odds;
+      const effectiveEV   = computeEV(probFinal, effectiveOdds);
+
+      // 门槛：odds 越高越严；主推荐用 minEV，冷门用 minEV * lsEvMul
+      const minEVSafe     = effectiveMinEV(minEV, side.odds);
+      const minEVLongshot = effectiveMinEV(minEV * lsEvMul, side.odds);
+
+      // 分档判定
+      let tier = 'skip';
+      let stake = stakeRaw;
+      let tierReason = '';
+
+      const evPass    = ev0 >= minEVSafe;
+      const evPassLs  = ev0 >= minEVLongshot;
+
+      if (!safeMode) {
+        // 旧行为：只看 EV 与最小仓位
+        if (evPass && stake >= minStake) tier = 'safe';
+        else tierReason = evPass ? '仓位<最低' : 'EV<门槛';
+      } else if (probFinal >= pFinalSafe && evPass && stake >= minStake) {
+        tier = 'safe';
+      } else if (allowLongshot && probFinal < pFinalSafe && evPassLs) {
+        // 冷门：Kelly 打折 + 余额上限
+        const stakeLs = Math.min(
+          Math.floor(stakeRaw * lsStakeMul),
+          Math.floor(balance * lsBalanceCap)
+        );
+        stake = Math.max(0, stakeLs);
+        if (stake >= minStake) {
+          tier = 'longshot';
+        } else {
+          tier = 'skip';
+          tierReason = '冷门仓位<最低';
+        }
+      } else {
+        tier = 'skip';
+        if (probFinal < pFinalSafe && !evPassLs) tierReason = 'EV 未过冷门门槛';
+        else if (probFinal < pFinalSafe && !allowLongshot) tierReason = '冷门已关闭';
+        else if (!evPass) tierReason = 'EV<门槛';
+        else if (stake < minStake) tierReason = '仓位<最低';
+      }
+
+      // 冷门档要按新 stake 重新算 effectiveOdds/effectiveEV
+      let finalEffOdds = effectiveOdds;
+      let finalEffEV   = effectiveEV;
+      if (tier === 'longshot' && stake !== stakeRaw) {
+        finalEffOdds = stake > 0 ? (1 + opponentPool / (sidePool + stake)) : side.odds;
+        finalEffEV   = computeEV(probFinal, finalEffOdds);
+      }
+
+      return {
+        side, idx: i,
+        probLlm, probMarket, probFinal, prob: probFinal,
+        ev: ev0, kelly: f0, fDynamic,
+        stake,
+        acceptable: tier !== 'skip',
+        tier, tierReason,
+        minEVSafe, minEVLongshot,
+        effectiveOdds: finalEffOdds, effectiveEV: finalEffEV
+      };
+    };
+
+    const opts = cs.map((side, i) => evaluate(side, i));
+
+    // 选最佳：safe 优先，同档内按 effectiveEV 从大到小
+    const safeOpts = opts.filter(o => o.tier === 'safe').sort((x, y) => y.effectiveEV - x.effectiveEV);
+    const lsOpts   = opts.filter(o => o.tier === 'longshot').sort((x, y) => y.effectiveEV - x.effectiveEV);
+    const best     = safeOpts[0] || lsOpts[0] || null;
+
+    // 展示排序：按静态 EV 从大到小
     opts.sort((x, y) => y.ev - x.ev);
 
-    return { options: opts, best };
+    return {
+      options: opts, best,
+      meta: {
+        safeMode, allowLongshot, pFinalSafe,
+        confidence, blendWeight: safeMode ? confidence : 1
+      }
+    };
   }
 
   // ============================================================
@@ -859,7 +974,7 @@
       // 用当前最新 detail（池/赔率/余额可能已漂移）+ 缓存的 prediction 重新算 decision
       try {
         const decision = decideStake(cached.prediction, detail);
-        wrap.innerHTML = `<div class="sh-title"><span>🤖 LLM 竞猜辅助</span><span class="sh-badge">v0.2.0</span></div><div class="sh-body"></div>`;
+        wrap.innerHTML = `<div class="sh-title"><span>🤖 LLM 竞猜辅助</span><span class="sh-badge">v0.3.0</span></div><div class="sh-body"></div>`;
         const target = document.querySelector('#choices') || document.querySelector('.card-body');
         if (target) target.insertBefore(wrap, target.firstChild);
         else document.body.prepend(wrap);
@@ -875,7 +990,7 @@
     wrap.innerHTML = `
       <div class="sh-title">
         <span>🤖 LLM 竞猜辅助</span>
-        <span class="sh-badge">v0.2.0</span>
+        <span class="sh-badge">v0.3.0</span>
       </div>
       <div class="sh-body">
         <button class="sh-btn primary" id="sh-analyze">开始分析</button>
@@ -910,39 +1025,73 @@
   function renderResult(panel, detail, prediction, decision, cacheMeta) {
     const cs = detail.choices;
     const best = decision.best;
+    const meta = decision.meta || {};
 
     const evClass = (ev) => ev > 0.02 ? 'sh-pos' : (ev < -0.02 ? 'sh-neg' : '');
     const pct = (x) => (x * 100).toFixed(1) + '%';
     const num = (x) => (isFinite(x) ? x.toFixed(3) : '—');
     const sign = (x) => (x > 0 ? '+' : '') + num(x);
 
-    // 按挂牌 EV 从大到小展示所有选项（decision.options 已排序）
-    // 每个选项一行：名称 | 胜率 | 赔率 | EV | 池
+    // 每个选项一行：名称 | LLM% | 市场% | 混合% | 赔率 | EV
+    // 未达任何门槛（tier=skip）行 opacity 淡显
     const rowsHtml = decision.options.map(o => {
       const isBest = best && o.side === best.side;
-      const style  = isBest ? 'background:#dafbe1;border-radius:4px;padding:2px 4px;' : '';
-      const tag    = isBest ? ' 🎯' : '';
-      return `<div class="sh-row" style="${style}">
-        <span class="k" style="flex:1;">${escapeHtml(o.side.name)}${tag}</span>
-        <span class="v" style="width:70px;text-align:right;">${pct(o.prob)}</span>
-        <span class="v" style="width:70px;text-align:right;">1:${o.side.odds}</span>
-        <span class="v ${evClass(o.ev)}" style="width:70px;text-align:right;">${sign(o.ev)}</span>
+      const tierIcon = o.tier === 'safe' ? '🟢' : (o.tier === 'longshot' ? '🟠' : '');
+      const bg = isBest
+        ? (o.tier === 'longshot'
+            ? 'background:#fff1e0;border:1px solid #ffb56b;'
+            : 'background:#dafbe1;border:1px solid #6ac26a;')
+        : '';
+      const opacity = o.tier === 'skip' ? 'opacity:0.55;' : '';
+      const tag = isBest ? ' 🎯' : '';
+      return `<div class="sh-row" style="${bg}border-radius:4px;padding:2px 4px;${opacity}">
+        <span class="k" style="flex:1;">${tierIcon} ${escapeHtml(o.side.name)}${tag}</span>
+        <span class="v" style="width:56px;text-align:right;" title="LLM 原始胜率">${pct(o.probLlm)}</span>
+        <span class="v" style="width:56px;text-align:right;color:#57606a;" title="市场共识（池占比）">${pct(o.probMarket)}</span>
+        <span class="v" style="width:56px;text-align:right;font-weight:600;" title="混合概率（贝叶斯收缩后）">${pct(o.probFinal)}</span>
+        <span class="v" style="width:56px;text-align:right;">1:${o.side.odds}</span>
+        <span class="v ${evClass(o.ev)}" style="width:60px;text-align:right;">${sign(o.ev)}</span>
       </div>`;
     }).join('');
 
+    // 顶部大 badge：safe / longshot / skip 三态
+    let topBadge = '';
+    if (!best) {
+      topBadge = `<div class="sh-warn" style="font-size:14px;font-weight:600;text-align:center;padding:10px;">
+        ⬜ 建议跳过 · 无满足门槛的选项
+      </div>`;
+    } else if (best.tier === 'safe') {
+      topBadge = `<div style="background:#dafbe1;border:1px solid #6ac26a;color:#0a5f2f;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:14px;font-weight:600;text-align:center;">
+        🟢 稳赢推荐 · ${escapeHtml(best.side.name)} · 混合胜率 ${pct(best.probFinal)}
+      </div>`;
+    } else if (best.tier === 'longshot') {
+      const lossPct = pct(1 - best.probFinal);
+      const capPct  = ((best.stake / Math.max(1, detail.balance)) * 100).toFixed(1);
+      topBadge = `<div style="background:#fff1e0;border:2px solid #bc4c00;color:#7a2c00;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:14px;font-weight:600;text-align:center;">
+        ⚠️ 冷门博（小仓位） · ${escapeHtml(best.side.name)}
+        <div style="font-size:12px;font-weight:500;margin-top:4px;">
+          胜率仅 ${pct(best.probFinal)}（${lossPct} 概率会输）· 仓位 ${capPct}% 余额
+        </div>
+      </div>`;
+    }
+
     const recHtml = best
-      ? `<div class="sh-rec">
-           💰 <b>推荐下注：${escapeHtml(best.side.name)}</b>
-           &nbsp;|&nbsp; 金额 <b>${best.stake}</b> 金币
+      ? `<div class="sh-rec" style="${best.tier === 'longshot' ? 'background:#fff1e0;border-color:#ffb56b;' : ''}">
+           💰 <b>下注：${escapeHtml(best.side.name)}</b>
+           &nbsp;|&nbsp; 金额 <b>${best.stake}</b>
            &nbsp;|&nbsp; 挂牌 EV <span class="${evClass(best.ev)}">${sign(best.ev)}</span>
            &nbsp;|&nbsp; 下注后有效赔率 1:${best.effectiveOdds.toFixed(3)}
            &nbsp;|&nbsp; 下注后 EV <span class="${evClass(best.effectiveEV)}">${sign(best.effectiveEV)}</span>
+           <div style="font-size:11px;color:#57606a;margin-top:4px;">
+             EV 门槛：${best.tier === 'longshot' ? '冷门 ' : ''}${(best.tier === 'longshot' ? best.minEVLongshot : best.minEVSafe).toFixed(3)}
+             ${meta.safeMode ? ' · 混合权重 w=' + meta.blendWeight.toFixed(2) : ''}
+           </div>
          </div>`
       : `<div class="sh-warn">
-           ⚠️ 无正期望选项，或未达最小 EV / 下注下限（当前阈值 EV ≥ ${cfg(CONFIG_KEYS.minEV)}, 最小 ${cfg(CONFIG_KEYS.minStake)} 币）。
+           ⚠️ 无满足门槛的选项。当前设置：${meta.safeMode ? '稳赢模式开，' : ''}主推荐要求混合胜率 ≥ ${(meta.pFinalSafe * 100).toFixed(0)}% 且 EV ≥ ${cfg(CONFIG_KEYS.minEV)}。
          </div>`;
 
-    // 缓存信息条：显示分析时间 + 截止时间（若命中缓存）
+    // 缓存信息条
     let cacheHtml = '';
     if (cacheMeta && cacheMeta.ts) {
       const ageMin = Math.max(0, Math.round((Date.now() - cacheMeta.ts) / 60000));
@@ -955,15 +1104,19 @@
 
     panel.querySelector('.sh-body').innerHTML = `
       ${cacheHtml}
+      ${topBadge}
       <div style="display:flex;font-size:11px;color:#57606a;padding:2px 4px;">
         <span style="flex:1;">选项 (${cs.length} 选 1)</span>
-        <span style="width:70px;text-align:right;">胜率(LLM)</span>
-        <span style="width:70px;text-align:right;">赔率</span>
-        <span style="width:70px;text-align:right;">EV</span>
+        <span style="width:56px;text-align:right;" title="LLM 原始胜率">LLM</span>
+        <span style="width:56px;text-align:right;" title="市场共识（池占比）">市场</span>
+        <span style="width:56px;text-align:right;" title="混合概率（贝叶斯收缩后）">混合</span>
+        <span style="width:56px;text-align:right;">赔率</span>
+        <span style="width:60px;text-align:right;">EV</span>
       </div>
       ${rowsHtml}
       <div class="sh-row" style="margin-top:6px;">
-        <span class="k">置信度</span><span class="v">${pct(prediction.confidence)}</span>
+        <span class="k">置信度 · 混合权重</span>
+        <span class="v">${pct(prediction.confidence)} · w=${(meta.blendWeight || 1).toFixed(2)}</span>
       </div>
       ${renderDivergenceRow(detail, prediction)}
       <div class="sh-row">
@@ -981,7 +1134,7 @@
     panel.querySelector('#sh-reanalyze').addEventListener('click', () => {
       const d = parseDetail();
       if (d) {
-        deletePredCache(extractDetailId(location.href));   // 强制刷新
+        deletePredCache(extractDetailId(location.href));
         runAnalysis(d, panel);
       }
     });
@@ -1002,6 +1155,19 @@
       detail.goldInput.dispatchEvent(new Event('change', { bubbles: true }));
 
       if (alsoSubmit) {
+        // 冷门档：先出橙色二次确认，说清楚风险
+        if (best.tier === 'longshot') {
+          const lossPct = ((1 - best.probFinal) * 100).toFixed(1);
+          const okLs = confirm(
+            `⚠️ 冷门博确认\n\n` +
+            `选项：${best.side.name}\n` +
+            `混合胜率仅 ${(best.probFinal * 100).toFixed(1)}%（${lossPct}% 概率会输掉这笔）\n` +
+            `仓位：${best.stake} 金币（约 ${((best.stake / Math.max(1, detail.balance)) * 100).toFixed(1)}% 余额）\n` +
+            `赔率：1:${best.side.odds}\n\n` +
+            `这是小仓位博冷门，不是稳赢推荐。确认？`
+          );
+          if (!okLs) return;
+        }
         const ok = confirm(
           `确认下注？\n\n选项：${best.side.name}\n金额：${best.stake} 金币\n赔率：1:${best.side.odds}\n\n注意：动态赔率可能在你确认前继续变化。`
         );
@@ -1120,7 +1286,43 @@
       '<div class="sh-test-out" id="sh-test-out"></div>' +
 
       '<details class="sh-adv">' +
-      '<summary>⚙️ 高级选项（策略参数 / 调试日志）</summary>' +
+      '<summary>⚙️ 高级选项（稳赢模式 / 策略参数 / 调试日志）</summary>' +
+
+      '<div class="sh-section-title">🛡️ 稳赢-回本模式 <span style="color:#bc4c00;font-weight:normal;font-size:11px;">(v0.3 新增)</span></div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-safe">稳赢模式</label>' +
+        '<div class="sh-field-check">' +
+          '<input type="checkbox" id="sh-f-safe"/>' +
+          '<span style="color:#57606a;font-size:11px;">按 confidence 混合 LLM 概率与市场共识，减少小概率事件误推荐</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-allow-ls">允许冷门博</label>' +
+        '<div class="sh-field-check">' +
+          '<input type="checkbox" id="sh-f-allow-ls"/>' +
+          '<span style="color:#57606a;font-size:11px;">高赔率+高 EV 时开小仓位（带明显警告和二次确认）</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-pfinal">主推荐最低胜率</label>' +
+        '<input type="number" step="0.05" min="0.5" max="0.95" id="sh-f-pfinal"/>' +
+        '<div class="sh-hint">混合胜率 ≥ 此值才归为「稳赢推荐」（0.55 = 55%）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-ls-evmul">冷门 EV 倍数</label>' +
+        '<input type="number" step="0.5" min="1" max="10" id="sh-f-ls-evmul"/>' +
+        '<div class="sh-hint">冷门 EV 门槛 = 主推荐 EV × 此值（2.0 = 翻倍要求）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-ls-stake">冷门 Kelly 折扣</label>' +
+        '<input type="number" step="0.1" min="0.05" max="1" id="sh-f-ls-stake"/>' +
+        '<div class="sh-hint">冷门 Kelly 打折（0.3 = 3 折仓位）</div>' +
+      '</div>' +
+      '<div class="sh-field">' +
+        '<label for="sh-f-ls-cap">冷门余额上限%</label>' +
+        '<input type="number" step="0.01" min="0.01" max="0.5" id="sh-f-ls-cap"/>' +
+        '<div class="sh-hint">冷门单笔最多用余额百分比（0.05 = 5%）</div>' +
+      '</div>' +
 
       '<div class="sh-section-title">📊 策略参数</div>' +
       '<div class="sh-field">' +
@@ -1179,6 +1381,12 @@
     const inpMinS   = $('#sh-f-min');
     const inpMaxS   = $('#sh-f-max');
     const inpDebug  = $('#sh-f-debug');
+    const chkSafeMode = $('#sh-f-safe');
+    const chkAllowLS  = $('#sh-f-allow-ls');
+    const inpPFinal   = $('#sh-f-pfinal');
+    const inpLsEvMul  = $('#sh-f-ls-evmul');
+    const inpLsStake  = $('#sh-f-ls-stake');
+    const inpLsCap    = $('#sh-f-ls-cap');
     const selPreset = $('#sh-f-preset');
     const noteBox   = $('#sh-preset-note');
     const testOut   = $('#sh-test-out');
@@ -1193,6 +1401,12 @@
     inpMinS.value  = cfg(CONFIG_KEYS.minStake);
     inpMaxS.value  = cfg(CONFIG_KEYS.maxStake);
     inpDebug.checked = !!cfg(CONFIG_KEYS.debug);
+    chkSafeMode.checked = !!cfg(CONFIG_KEYS.safeMode);
+    chkAllowLS.checked  = !!cfg(CONFIG_KEYS.allowLongshot);
+    inpPFinal.value  = cfg(CONFIG_KEYS.pFinalSafe);
+    inpLsEvMul.value = cfg(CONFIG_KEYS.longshotEvMul);
+    inpLsStake.value = cfg(CONFIG_KEYS.longshotStakeMul);
+    inpLsCap.value   = cfg(CONFIG_KEYS.longshotBalanceCap);
 
     // -------- 预设下拉 --------
     const optPlaceholder = document.createElement('option');
@@ -1302,6 +1516,12 @@
       inpMinS.value  = DEFAULTS[CONFIG_KEYS.minStake];
       inpMaxS.value  = DEFAULTS[CONFIG_KEYS.maxStake];
       inpDebug.checked = !!DEFAULTS[CONFIG_KEYS.debug];
+      chkSafeMode.checked = !!DEFAULTS[CONFIG_KEYS.safeMode];
+      chkAllowLS.checked  = !!DEFAULTS[CONFIG_KEYS.allowLongshot];
+      inpPFinal.value  = DEFAULTS[CONFIG_KEYS.pFinalSafe];
+      inpLsEvMul.value = DEFAULTS[CONFIG_KEYS.longshotEvMul];
+      inpLsStake.value = DEFAULTS[CONFIG_KEYS.longshotStakeMul];
+      inpLsCap.value   = DEFAULTS[CONFIG_KEYS.longshotBalanceCap];
       selPreset.value = '';
       noteBox.style.display = 'none';
     });
@@ -1378,12 +1598,16 @@
       };
 
       const nums = [
-        { el: inpTemp,  key: CONFIG_KEYS.temperature, name: 'temperature' },
-        { el: inpKelly, key: CONFIG_KEYS.kellyFrac,   name: '凯利折扣' },
-        { el: inpMinEv, key: CONFIG_KEYS.minEV,       name: '最小 EV' },
-        { el: inpPct,   key: CONFIG_KEYS.maxStakePct, name: '单笔上限%' },
-        { el: inpMinS,  key: CONFIG_KEYS.minStake,    name: '硬下限' },
-        { el: inpMaxS,  key: CONFIG_KEYS.maxStake,    name: '硬上限' }
+        { el: inpTemp,    key: CONFIG_KEYS.temperature,        name: 'temperature' },
+        { el: inpKelly,   key: CONFIG_KEYS.kellyFrac,          name: '凯利折扣' },
+        { el: inpMinEv,   key: CONFIG_KEYS.minEV,              name: '最小 EV' },
+        { el: inpPct,     key: CONFIG_KEYS.maxStakePct,        name: '单笔上限%' },
+        { el: inpMinS,    key: CONFIG_KEYS.minStake,           name: '硬下限' },
+        { el: inpMaxS,    key: CONFIG_KEYS.maxStake,           name: '硬上限' },
+        { el: inpPFinal,  key: CONFIG_KEYS.pFinalSafe,         name: '主推荐最低胜率' },
+        { el: inpLsEvMul, key: CONFIG_KEYS.longshotEvMul,      name: '冷门 EV 倍数' },
+        { el: inpLsStake, key: CONFIG_KEYS.longshotStakeMul,   name: '冷门 Kelly 折扣' },
+        { el: inpLsCap,   key: CONFIG_KEYS.longshotBalanceCap, name: '冷门余额上限%' }
       ];
       for (const n of nums) {
         const v = Number(n.el.value);
@@ -1395,6 +1619,8 @@
       setCfg(CONFIG_KEYS.model,   model);
       for (const n of nums) setCfg(n.key, Number(n.el.value));
       setCfg(CONFIG_KEYS.debug, !!inpDebug.checked);
+      setCfg(CONFIG_KEYS.safeMode,      !!chkSafeMode.checked);
+      setCfg(CONFIG_KEYS.allowLongshot, !!chkAllowLS.checked);
 
       m.close();
       // 用轻量提示替代 alert（避免打断）
